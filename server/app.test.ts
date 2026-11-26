@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { request as httpRequest } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,16 +10,17 @@ import type { ChatMessage } from "../shared/chat.ts";
 import { createApp } from "./app.ts";
 import { createJsonTaskStore } from "./task-store.ts";
 
-async function startTestApp(t: TestContext) {
+async function startTestApp(t: TestContext, chatAvailable = false) {
   const directory = await mkdtemp(join(tmpdir(), "todo-agent-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const filename = join(directory, "tasks.json");
   const conversations: ChatMessage[][] = [];
   const app = createApp({
     tasks: createJsonTaskStore(filename),
+    chatAvailable,
     async reply(messages) {
       conversations.push(messages);
-      return "收到";
+      return { reply: "收到" };
     },
   });
 
@@ -39,7 +41,7 @@ async function startTestApp(t: TestContext) {
     };
   }
 
-  return { request, conversations, filename };
+  return { request, conversations, filename, port };
 }
 
 test("任务 API 可以创建、列出、修改和删除任务", async (t) => {
@@ -82,6 +84,20 @@ test("更新已有 JSON 清单时保留其他任务和扩展字段", async (t) =
   assert.deepEqual(createJsonTaskStore(filename).list(), [{ ...first, done: true }, second]);
 });
 
+test("聊天配置接口只公开是否配置，并禁止缓存", async (t) => {
+  const demo = await startTestApp(t);
+  assert.deepEqual(await demo.request("GET", "/api/chat/config"), {
+    status: 200,
+    body: { available: false },
+  });
+
+  const live = await startTestApp(t, true);
+  const response = await fetch(`http://127.0.0.1:${live.port}/api/chat/config`);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.deepEqual(await response.json(), { available: true });
+  assert.deepEqual(live.conversations, []);
+});
+
 test("聊天 API 只将有效的完整对话传给智能体，并返回其回复", async (t) => {
   const { request, conversations } = await startTestApp(t);
   const messages = [
@@ -95,4 +111,50 @@ test("聊天 API 只将有效的完整对话传给智能体，并返回其回复
   const invalid = await request("POST", "/api/chat", { messages: messages.slice(0, 2) });
   assert.equal(invalid.status, 400);
   assert.deepEqual(conversations, [messages]);
+});
+
+test("读取旧版演示记录不会改写日期或完成状态", async (t) => {
+  const { request, filename } = await startTestApp(t);
+  const task = {
+    id: "legacy",
+    title: "读报告",
+    done: true,
+    dueDate: "2026-11-27",
+    demoDay: "2000-01-01",
+    demoInitialStatus: "pending",
+  };
+  const saved = JSON.stringify([task]);
+  await writeFile(filename, saved);
+
+  assert.deepEqual(await request("GET", "/api/tasks"), { status: 200, body: [task] });
+  assert.equal(await readFile(filename, "utf8"), saved);
+});
+
+
+test("API 拒绝非本机 Host，且不会调用 Agent", async (t) => {
+  const { conversations, port } = await startTestApp(t);
+  const body = JSON.stringify({ messages: [{ role: "user", content: "你好" }] });
+  const status = await new Promise<number | undefined>((resolve, reject) => {
+    const request = httpRequest(
+      {
+        hostname: "127.0.0.1",
+        port,
+        method: "POST",
+        path: "/api/chat",
+        headers: {
+          Host: "example.test",
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(body),
+        },
+      },
+      (response) => {
+        response.resume();
+        resolve(response.statusCode);
+      },
+    );
+    request.on("error", reject);
+    request.end(body);
+  });
+  assert.equal(status, 403);
+  assert.deepEqual(conversations, []);
 });

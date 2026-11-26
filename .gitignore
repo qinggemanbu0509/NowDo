@@ -1,7 +1,17 @@
 node_modules/
 dist/
 data/
+
+# Local credentials and configuration
 .env*
 !.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Local build and debug artifacts
 *.log
+*.tsbuildinfo
 .DS_Store
+Thumbs.db

@@ -2,11 +2,23 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#f8f9fc" />
-    <link rel="icon" href="/logo.png" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
+    />
+    <meta name="theme-color" content="#101010" />
+    <script>
+      try {
+        if (localStorage.getItem("nowdo.theme") === "light") {
+          document.documentElement.dataset.theme = "light";
+          document.querySelector('meta[name="theme-color"]').content = "#f6f8fb";
+        }
+      } catch {}
+    </script>
+    <link rel="icon" href="/logo.png?v=nowdo" />
+    <link rel="preload" href="/logo.png?v=nowdo" as="image" />
     <link rel="stylesheet" href="/style.css" />
-    <title>小明智能体 · TokeNow</title>
+    <title>Tokenow·NowDo</title>
   </head>
   <body>
     <div id="root"></div>

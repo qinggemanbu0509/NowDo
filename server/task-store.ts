@@ -2,15 +2,16 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { z } from "zod";
+import type { TaskMetadataChanges, TaskSchedule } from "../shared/tasks.ts";
 
 const storedTask = z.looseObject({ id: z.string(), title: z.string(), done: z.boolean() });
 const taskList = z.array(storedTask);
 type Task = z.infer<typeof storedTask>;
-type TaskChanges = Partial<Pick<Task, "title" | "done">>;
+type TaskChanges = Partial<Pick<Task, "title" | "done">> & TaskMetadataChanges;
 
 export interface TaskStore {
   list(): Task[];
-  create(title: string): Task;
+  create(title: string, schedule?: TaskSchedule): Task;
   update(id: string, changes: TaskChanges): Task | undefined;
   remove(id: string): boolean;
 }
@@ -32,8 +33,8 @@ export function createJsonTaskStore(filename: string): TaskStore {
   return {
     list,
 
-    create(title) {
-      const task = { id: randomUUID(), title, done: false };
+    create(title, schedule) {
+      const task = { id: randomUUID(), title, done: false, ...schedule };
       save([...list(), task]);
       return task;
     },
@@ -44,6 +45,7 @@ export function createJsonTaskStore(filename: string): TaskStore {
       if (!task) return undefined;
 
       Object.assign(task, changes);
+      if (changes.dueDate === null) delete task.startTime;
       save(tasks);
       return task;
     },
